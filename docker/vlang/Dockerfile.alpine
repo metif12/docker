@@ -4,12 +4,25 @@
 
 ARG USER=thevlang
 
+# Which V revision is built: a branch, tag or commit. The default is V master,
+# which is what the nightly images are. The release images are built from the
+# tag itself, by the vlang/v `hub_docker_ci.yml` job that triggers on a V
+# release tag, so a `:<version>` image contains exactly that version.
+ARG V_REV=master
+
 # Stage 1 - Build the V-compiler
 FROM ${USER}/vlang:alpine-build AS builder
 
+# Redeclared here: an ARG declared before the first FROM is out of a build
+# stage's scope, so it has to be repeated to be readable by these RUN commands.
+ARG V_REV
+
 WORKDIR /opt/vlang
 
-RUN git clone --depth 1 https://github.com/vlang/v /opt/vlang && make VFLAGS='-cc gcc' && v -version
+RUN git clone --depth 1 https://github.com/vlang/v /opt/vlang && \
+    git -C /opt/vlang fetch --quiet --depth 1 origin "${V_REV}" && \
+    git -C /opt/vlang checkout --quiet FETCH_HEAD && \
+    make VFLAGS='-cc gcc' && v -version
 
 # Stage 2 - Make minimal runtime without git and make 
 #           we still nedd gcc and musl-dev for v to compile;
@@ -26,5 +39,10 @@ RUN apk --no-cache add \
 
 # Copy the prebuilt V compiler
 COPY --from=builder /opt/vlang /opt/vlang
+
+LABEL org.opencontainers.image.title="thevlang/vlang:alpine"
+LABEL org.opencontainers.image.description="The V language on Alpine/musl, with a C compiler so V can still build programs"
+LABEL org.opencontainers.image.source="https://github.com/vlang/docker"
+LABEL org.opencontainers.image.licenses="MIT"
 
 WORKDIR /src

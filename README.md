@@ -1,120 +1,270 @@
-![GitHub Workflow Status](https://img.shields.io/github/workflow/status/vlang/docker/Deploy%20nightly%20build%20to%20Dockerhub) 
+![GitHub Workflow Status](https://img.shields.io/github/workflow/status/vlang/docker/Deploy%20nightly%20build%20to%20Dockerhub)
 [![Docker Pulls](https://img.shields.io/docker/pulls/thevlang/vlang)](https://hub.docker.com/r/thevlang/vlang)
 [![Docker Image Size (latest by date)](https://img.shields.io/docker/image-size/thevlang/vlang)](https://hub.docker.com/r/thevlang/vlang/tags?page=1&ordering=last_updated)
 
-# V programming language docker images source (Work in progress)
-The docker files for the V programming language. Please check individual `Dockerfile` for what is provided in detail
+# The `thevlang/vlang` images
 
-Works both with docker for linux and windows on x86 plattform.
+The Dockerfiles for the `thevlang/vlang` images on Docker Hub, and the workflows
+that publish them.
 
-## WIP
+Everything here works with **Docker** or **Podman**: the build files are
+`Dockerfile*` and Podman reads Dockerfiles natively, so no conversion is needed.
 
-- [x] Basic images 
-- [ ] Get nightly builds working
-- [ ] Provide examples of usage (vweb @smartiniOnGitHub example)
+## The variants
 
-## Structure
+An official image has to answer one question first: *can it build programs?* V
+is a compiler that emits C and then invokes a C compiler, so an image without a
+C compiler can only run things that were compiled elsewhere.
 
-| folder          | Description                                         |
-| --------------- | --------------------------------------------------- |
-| base/os         | Docker files for supported os. Minimal dependencies |
-| vlang           | Docker files for `thevlang/vlang` images            |
+| Tag | Base image | C library | C compiler | Use it for |
+| --- | --- | --- | --- | --- |
+| `:latest` / `:debian` | `alpine-base` (see note) | musl | gcc | the default; the images the rest of the V toolchain assumes |
+| `:alpine` | `alpine-base` | musl | gcc | small images, and static executables (`-cflags -static`) |
+| `:nix` | `nixos/nix` | glibc | gcc | reproducible builds; pulling in any nixpkgs library |
+| `:static` | `scratch` | none | none | `v version`, and as a base for a static V program |
+| `:<dist>-dev` | the `-build` image | as above | as above | a working V checkout, for working on V itself |
+| `:<dist>-build` / `:<dist>-base` | as above | as above | build deps only | the intermediate images the Dockerfiles stand on |
 
-## Structure of the image
+`:debian`, `:alpine` and `:nix` are floating tags tracking V master, rebuilt
+nightly. Every variant is published for both `linux/amd64` and `linux/arm64`.
+`:static` is published as `:static` by the nightly workflow and additionally as
+`:static-<version>` by the release job.
 
-The images are deployed as `thevlang/vlang:tag`. 
+> **Note on `:debian`.** It is currently built `FROM thevlang/vlang:alpine-build`
+> (see `docker/vlang/Dockerfile.debian:9`), so it is an Alpine-based image with
+> a Debian tag. It works, and it is what CI uses, but if you need a real
+> glibc/Debian image, build `Dockerfile.debian` yourself against `debian-base`
+> and `debian-build` until the tag is fixed. Tracked here as a known issue.
 
-# Usage
+## Using the images
 
-## 1. Installing docker
-
-[Here are installation instructions on ubuntu](https://docs.docker.com/engine/install/ubuntu/) but there are instructions for other distributions too.
-
-## 2 Running the image
-
-### Choose your image
-
-Browse [thevlang/vlang](https://hub.docker.com/r/thevlang/vlang/tags?page=1&ordering=last_updated) on Docker Hub and choose your tag.
-
-### Running the standard image
-
-Running the development image using iteractive terminal.
+### Run V on the code in the current directory
 
 ```bash
-docker run \
-  -it \
-  --name v-container \
-  thevlang/vlang \
-  /bin/bash
+docker run --rm -it -v "$PWD":/src -w /src thevlang/vlang:latest v run main.v
 ```
 
-### Running the development image
+`/src` is the working directory in every image, so mounting your project there
+is all the setup there is. On Windows, use `%CD%` instead of `"$PWD"`.
 
-Running the development image using iteractive terminal and mapping current directory to internal /src directory.
+### An interactive shell
+
 ```bash
-docker run \
-  -it \
-  -v ${PWD}:/src \
-  --name v-dev-container \
-  thevlang/vlang:alpine-dev \
-  /bin/sh
+docker run --rm -it -v "$PWD":/src -w /src thevlang/vlang:alpine sh
 ```
 
-### Using Docker Compose
+### Run a single command without a shell
 
-Creating a container ready to go in.
+```bash
+docker run --rm thevlang/vlang:latest v version
+docker run --rm thevlang/vlang:latest v fmt -verify .
+```
+
+### Where V writes
+
+V creates a module cache and temporary files, so it needs a writable home:
+
+| Variable | Default in these images | Why it matters |
+| --- | --- | --- |
+| `HOME` | `/root`, except `:static` where it is `/tmp` | `~/.vmodules` and the tool cache live here |
+| `VTMP` | unset (V uses the system temp) | set it to a writable path in read-only containers |
+| `VMODULES` | unset | where `v install` puts modules |
+
+In `:static` there is no writable `/root`, so `HOME` is set to `/tmp` — keep that
+in mind if you override the environment.
+
+### Docker Compose
 
 ```yml
-version: "3"
 services:
   v:
     image: thevlang/vlang:alpine
-    tty: true # Keeps your container running
+    tty: true
     volumes:
-      - .:/home/v
-    working_dir: /home/v
+      - .:/src
+    working_dir: /src
 ```
-
-Use it:
 
 ```bash
-you@pc > docker-compose exec v sh
-$ v --version
-V 0.2.2 f4486d7
+docker compose run --rm v v run main.v
+docker compose exec v sh
 ```
 
-Creating a disposable container.
+## The `:static` image
 
-```yml
-version: "3"
-services:
-  v:
-    image: thevlang/vlang:alpine
-    entrypoint: v
-    volumes:
-      - .:/home/v
-    working_dir: /home/v
-```
-
-Use it:
+`FROM scratch`, so: no libc, no loader, no shell, no C compiler. It contains a
+statically linked V compiler and `vlib`.
 
 ```bash
-you@pc > docker-compose run v --version
-V 0.2.2 f4486d7
+# Works, because it needs nothing but the binary itself:
+docker run --rm thevlang/vlang:static v version
+
+# Does not work - V shells out to a C compiler for every `v run`:
+docker run --rm thevlang/vlang:static v run main.v
 ```
 
-# Different images being built
+Its real use is as a base image for a program you have already compiled:
 
-Following images are built from this repo:
+```dockerfile
+FROM thevlang/vlang:static
+COPY --from=build /app/program /usr/local/bin/program
+CMD ["program"]
+```
 
-| tag             |       Description |
-| --------------- | ----------------- |
-| latest          | Nightly build of latest V on Debian Buster|
-| \[githash\]     | The sha commit id built (soon supported)|
-| buster          | Nightly build of latest V on Debian Buster|
-| alpine          | Nightly build of latest V on Alpine 3.11 |
-| ubuntu          | Nightly build of latest V on Ubuntu 20.04|
-| runtime-scratch | Minimal size scratch based image with runtime dependencies (soon supported)|
-| \[dist\]-build  | Used in V CI builds to build V itself. No V included in image.|
-| \[dist\]-dev  | Development build with all development dependecies on distributions.|
+Build the program in a variant that *has* a compiler:
 
+```bash
+docker run --rm -v "$PWD":/src -w /src thevlang/vlang:alpine \
+  v -prod -cc gcc -cflags -static -o program main.v
+```
+
+`:static` also gives you the smallest possible V: ~19 MB for the compiler plus
+`vlib`. `v fmt`, `v doc` and the other subcommands are not included, because they
+are driven by building `cmd/tools/<tool>` from a source tree at run time (see
+`find_vroot` and `launch_external_tool` in `cmd/v/v.v`), which needs both a
+compiler and a checkout.
+
+## The `:nix` image
+
+The toolchain comes from **one pinned nixpkgs revision**
+(`NIXPKGS_REV`, currently `39ad350a...`, 2026-10-07) instead of from
+`apk add`/`apt install`:
+
+```bash
+docker run --rm thevlang/vlang:nix v version
+```
+
+The practical difference is what you can do *inside* the container. Any nixpkgs
+library can be made available without root, and the toolchain no longer drifts:
+
+```bash
+docker run --rm -v "$PWD":/src -w /src thevlang/vlang:nix \
+  sh -c 'nix-shell -p openssl sqlite --run "v run main.v"'
+```
+
+Bumping the pin is the only way the image contents change, which is what makes a
+`:nix` build reproducible. To build against a different pin:
+
+```bash
+docker build -t vlang-nix-pinned \
+  --build-arg NIXPKGS_REV=<nixpkgs-commit> \
+  -f docker/vlang/Dockerfile.nix.build .
+```
+
+Note that `nixos/nix` is not available in every region; if a pull fails with a
+CloudFront 403, build `docker/vlang/Dockerfile.nix` on a host that can reach it,
+or install Nix yourself and use the `devShell` in `nix/flake.nix`.
+
+## Building the images yourself
+
+The build files are ordinary Dockerfiles, so Docker and Podman both read them.
+Every image that clones V takes the revision to build:
+
+| Build arg | Default | Meaning |
+| --- | --- | --- |
+| `V_REV` | `master` | a branch, tag or commit of [vlang/v](https://github.com/vlang/v) |
+| `NIXPKGS_REV` | the pinned revision | the nixpkgs commit the `nix` variants use |
+| `USER` | `thevlang` | the Docker Hub namespace the intermediate images live under |
+
+```bash
+# the variant you will probably want
+docker build -t vlang-nix -f docker/vlang/Dockerfile.nix .
+
+# a specific release, rather than master
+docker build --build-arg V_REV=0.5.2 -t vlang-0.5.2 -f docker/vlang/Dockerfile.alpine .
+
+# the static image
+docker build -t vlang-static -f docker/vlang/Dockerfile.static .
+```
+
+Building `Dockerfile.alpine` / `Dockerfile.debian` / `Dockerfile.nix` needs the
+matching `-base` and `-build` images to exist locally under the namespace
+`USER` names. Either pull them, or build them first:
+
+```bash
+docker build -t myuser/vlang:alpine-base -f docker/base/Dockerfile.alpine .
+docker build -t myuser/vlang:alpine-build -f docker/vlang/Dockerfile.alpine.build .
+docker build --build-arg USER=myuser -t vlang-alpine -f docker/vlang/Dockerfile.alpine .
+```
+
+### Multi-arch
+
+The published images are `linux/amd64` + `linux/arm64`. A multi-arch build needs
+a builder that can emulate the other architecture:
+
+```bash
+docker run --privileged --rm tonistiigi/binfmt --install all
+docker buildx create --name multi --driver docker-container --use
+docker buildx build --platform linux/amd64,linux/arm64 \
+  -t thevlang/vlang:nix --push -f docker/vlang/Dockerfile.nix .
+```
+
+A `docker-container` driver is required: the default builder cannot produce a
+multi-platform manifest. Use `--load` instead of `--push` to keep the result in
+the local image store.
+
+Emulation is slow — a full V build under QEMU takes a long time — so prefer
+native builders for anything you run often. If you already have separate
+per-arch images and no registry, `regctl index create` writes an OCI image index
+into a local `oci:` layout without a daemon:
+
+```bash
+regctl index create ocidir://layout:index \
+  --ref ocidir://layout:amd64 --platform linux/amd64 \
+  --ref ocidir://layout:arm64 --platform linux/arm64
+```
+
+## Podman
+
+Podman reads the same files. There is no daemon and no root required:
+
+```bash
+podman build -t vlang-nix -f docker/vlang/Dockerfile.nix .
+podman run --rm -v "$PWD":/src -w /src vlang-nix v run main.v
+```
+
+The practical differences:
+
+| | Docker | Podman |
+| --- | --- | --- |
+| Build engine | BuildKit, via a daemon | Buildah, forked per build; `podman buildx build` is only a compatibility alias |
+| Containers run as | root unless you say `--user` | your own UID by default |
+| Volume mounts | owned by root inside the container | owned by your UID, because it is your UID |
+| Multi-arch | `--platform`, via a `docker-container` builder | `--platform`, with `qemu-user-static` + `binfmt` on the host |
+| Registry names | short names resolve to `docker.io` | short names may be fully qualified in `registries.conf` |
+
+Two consequences worth knowing:
+
+- **No root daemon** means no `sudo docker`, and a build that dies does not
+  leave an orphaned daemon holding your ports.
+- **Rootless mounts** mean a file your container writes appears as *yours* on
+  the host. With Docker you get root-owned files and `chown` afterwards. This is
+  the main reason to prefer Podman for a mounted source directory.
+
+Multi-arch with Podman:
+
+```bash
+sudo dnf install qemu-user-static   # or: apt install qemu-user-static binfmt-support
+podman build --platform linux/amd64,linux/arm64 -t vlang-nix -f docker/vlang/Dockerfile.nix .
+podman manifest create vlang-nix:latest
+podman manifest add vlang-nix:latest containers-storage:localhost/vlang-nix
+podman manifest push vlang-nix:latest docker://myregistry/vlang:latest
+```
+
+## Publishing
+
+| Workflow | Trigger | What it publishes |
+| --- | --- | --- |
+| `base.yml` | push to `master`, PR, manual | `:<dist>-base` |
+| `build.yml` | push to `master`, PR, manual | `:<dist>-build` |
+| `build_ubuntu.yml` | push to `master`, PR, manual | `:ubuntu-base`, `:ubuntu-build` |
+| `nightly_builds.yml` | daily 02:00 UTC, push, PR | `:latest`, `:debian`, `:alpine`, `:nix`, `:static`, and every `:<dist>-dev` |
+| [vlang/v `hub_docker_ci.yml`](https://github.com/vlang/v/blob/master/.github/workflows/hub_docker_ci.yml) | a V release tag | the same variants, tagged `:<dist>-<version>` and `:<version>` built from that tag |
+
+Pushes require `DOCKER_USERNAME` and `DOCKER_TOKEN` secrets. `vars.PLATFORMS`
+and `vars.DOCKER_REPOSITORY` override the default platforms and namespace; the
+workflows fall back to `linux/amd64,linux/arm64` and `thevlang` when the
+variables are unset.
+
+Pull requests build but never push, and the login step is skipped for them, so a
+fork can validate its changes.

@@ -3,12 +3,19 @@
 # - gcc compiler (only works on alpine)
 
 ARG USER=thevlang
+# Which V revision is built; see the note in Dockerfile.alpine.
+ARG V_REV=master
 # Stage 1 - Build the V-compiler
 FROM ${USER}/vlang:alpine-build AS builder
 
+ARG V_REV
+
 WORKDIR /opt/vlang
 
-RUN git clone --depth 1 https://github.com/vlang/v /opt/vlang && make VFLAGS='-cc gcc' && v -version
+RUN git clone --depth 1 https://github.com/vlang/v /opt/vlang && \
+    git -C /opt/vlang fetch --quiet --depth 1 origin "${V_REV}" && \
+    git -C /opt/vlang checkout --quiet FETCH_HEAD && \
+    make VFLAGS='-cc gcc' && v -version
 
 # Stage 2 - Make minimal runtime without git and make 
 #           we still nedd gcc and musl-dev for v to compile;
@@ -25,5 +32,10 @@ RUN apk --no-cache add \
 
 # Copy the prebuilt V compiler
 COPY --from=builder /opt/vlang /opt/vlang
+
+LABEL org.opencontainers.image.title="thevlang/vlang:debian"
+LABEL org.opencontainers.image.description="The V language, with a C compiler so V can still build programs"
+LABEL org.opencontainers.image.source="https://github.com/vlang/docker"
+LABEL org.opencontainers.image.licenses="MIT"
 
 WORKDIR /src

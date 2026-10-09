@@ -1,0 +1,29 @@
+# Generates the development image based on Nix.
+#
+# Everything Dockerfile.nix has, plus the full V source tree built in place, so
+# the container is a working V checkout rather than just a compiler. Use it when
+# you want to hack on V itself:
+#
+#   docker run --rm -it -v "$PWD":/src thevlang/vlang:nix-dev sh
+#
+# Also the base for the `nix` CI job, which builds V and runs the test suite.
+ARG USER=thevlang
+FROM ${USER}/vlang:nix-build
+
+LABEL org.opencontainers.image.title="thevlang/vlang:nix-dev"
+LABEL org.opencontainers.image.description="Development image for V on a Nix-pinned toolchain"
+LABEL org.opencontainers.image.source="https://github.com/vlang/docker"
+LABEL org.opencontainers.image.licenses="MIT"
+
+# Which V revision is built; see Dockerfile.alpine.
+ARG V_REV=master
+
+WORKDIR /opt/vlang
+
+RUN git clone --depth 1 https://github.com/vlang/v . && \
+    git fetch --quiet --depth 1 origin "${V_REV}" && \
+    git checkout --quiet FETCH_HEAD && \
+    make VFLAGS='-cc gcc' && v -version && \
+    mkdir /src
+
+WORKDIR /src
