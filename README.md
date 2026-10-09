@@ -18,7 +18,7 @@ C compiler can only run things that were compiled elsewhere.
 
 | Tag | Base image | C library | C compiler | Use it for |
 | --- | --- | --- | --- | --- |
-| `:latest` / `:debian` | `alpine-base` (see note) | musl | gcc | the default; the images the rest of the V toolchain assumes |
+| `:latest` / `:debian` | `debian-base` | glibc | gcc | the default: a glibc binary built here runs on Debian, Ubuntu, Fedora and derivatives |
 | `:alpine` | `alpine-base` | musl | gcc | small images, and static executables (`-cflags -static`) |
 | `:nix` | `nixos/nix` | glibc | gcc | reproducible builds; pulling in any nixpkgs library |
 | `:static` | `scratch` | none | none | `v version`, and as a base for a static V program |
@@ -30,11 +30,11 @@ nightly. Every variant is published for both `linux/amd64` and `linux/arm64`.
 `:static` is published as `:static` by the nightly workflow and additionally as
 `:static-<version>` by the release job.
 
-> **Note on `:debian`.** It is currently built `FROM thevlang/vlang:alpine-build`
-> (see `docker/vlang/Dockerfile.debian:9`), so it is an Alpine-based image with
-> a Debian tag. It works, and it is what CI uses, but if you need a real
-> glibc/Debian image, build `Dockerfile.debian` yourself against `debian-base`
-> and `debian-build` until the tag is fixed. Tracked here as a known issue.
+`:debian` and `:alpine` differ in more than the package manager: the `:debian`
+image is glibc, so a program you compile in it runs on Debian, Ubuntu, Fedora
+and their derivatives, while the `:alpine` image is musl and its binaries run on
+Alpine. Pick by where the program has to run, not by which one you find more
+familiar.
 
 ## Using the images
 

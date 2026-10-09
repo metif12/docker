@@ -1,40 +1,43 @@
-# Minimal image for compiling V programs
-# - No UI dependencies
-# - gcc compiler (only works on alpine)
-
+# The V language on Debian, with a C compiler so V can still build programs.
+#
+# This image is glibc-based, which is what makes it worth having next to
+# Dockerfile.alpine: a glibc program linked here runs on Debian, Ubuntu, Fedora
+# and their derivatives, where a musl binary from the Alpine image does not.
 ARG USER=thevlang
 # Which V revision is built; see the note in Dockerfile.alpine.
 ARG V_REV=master
 # Stage 1 - Build the V-compiler
-FROM ${USER}/vlang:alpine-build AS builder
+FROM ${USER}/vlang:debian-build AS builder
 
 ARG V_REV
 
 WORKDIR /opt/vlang
 
+# CC=clang, not -cc gcc: debian-build installs clang and no gcc, and V's
+# Makefile passes CC to the bootstrap. Setting VFLAGS='-cc gcc' here fails with
+# "os: failed to find executable `gcc`" before the bootstrap even reaches cc.
 RUN git clone --depth 1 https://github.com/vlang/v /opt/vlang && \
     git -C /opt/vlang fetch --quiet --depth 1 origin "${V_REV}" && \
     git -C /opt/vlang checkout --quiet FETCH_HEAD && \
-    make VFLAGS='-cc gcc' && v -version
+    make CC=clang && v -version
 
-# Stage 2 - Make minimal runtime without git and make 
-#           we still nedd gcc and musl-dev for v to compile;
-#           libexecinfo is needed for the bundled tcc to work;
-#           libc-dev is needed for the various C headers like inttypes.h .
-
-FROM ${USER}/vlang:alpine-base AS runtime
+# Stage 2 - the runtime. gcc and libc6-dev are what V shells out to when it
+#           compiles a program; git is what `v install` uses. The runtime
+#           compiler is chosen independently of the one V was built with.
+FROM ${USER}/vlang:debian-base AS runtime
 
 ENV VFLAGS="-cc gcc"
 
-RUN apk --no-cache add \
-    gcc musl-dev git libc-dev
-# libexecinfo-static libexecinfo-dev : was removed since Alpine 3.17, check if still needed or remove this line
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    gcc libc6-dev git && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Copy the prebuilt V compiler
 COPY --from=builder /opt/vlang /opt/vlang
 
 LABEL org.opencontainers.image.title="thevlang/vlang:debian"
-LABEL org.opencontainers.image.description="The V language, with a C compiler so V can still build programs"
+LABEL org.opencontainers.image.description="The V language on Debian/glibc, with a C compiler so V can still build programs"
 LABEL org.opencontainers.image.source="https://github.com/vlang/docker"
 LABEL org.opencontainers.image.licenses="MIT"
 
