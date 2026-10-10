@@ -13,10 +13,16 @@ FROM ${USER}/vlang:alpine-base
 RUN apk --no-cache add \
     # Git support
     git openssh-client \
-    # js back-end 
+    # js back-end
     nodejs npm  \
     # V-development dependencies
     make musl-dev valgrind clang gcc \
+    # Boehm GC, which V links against in its default GC mode. Without it
+    # `make` gets as far as building ./v and then fails at `@./v -version`,
+    # where V populates its module cache for the builtin module with the
+    # default GC: "C library `gc:` was not found while linking the generated
+    # program."
+    gc gc-dev \
     # V-UI dependencies
     libx11-dev glfw-dev freetype-dev \
     # compilation/optimization utilities
