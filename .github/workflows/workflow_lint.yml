@@ -48,3 +48,23 @@ jobs:
             echo "no workflow files found - is the checkout empty?" >&2
             exit 1
           fi
+
+      # A file with no trailing newline is a POSIX text-file convention that
+      # matters here: POSIX defines a text file as ending in a newline, and a
+      # change to the last line of one that does not shows
+      # "\ No newline at end of file" in the diff, which is noise on every
+      # subsequent edit. All nine Dockerfiles in this repository had it, which
+      # is what a reviewer flagged.
+      - name: Every Dockerfile ends with a newline
+        run: |
+          set -euo pipefail
+          bad=()
+          while IFS= read -r f; do
+            [ -n "$(tail -c 1 "$f")" ] && bad+=("$f")
+          done < <(find docker -type f -name 'Dockerfile*' | sort)
+          if [ "${#bad[@]}" -gt 0 ]; then
+            echo "::error::no trailing newline in: ${bad[*]}"
+            printf '%s\n' "${bad[@]}"
+            exit 1
+          fi
+          echo "all $(find docker -type f -name 'Dockerfile*' | wc -l) Dockerfiles end with a newline"
