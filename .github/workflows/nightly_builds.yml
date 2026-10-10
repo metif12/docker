@@ -154,8 +154,10 @@ jobs:
           platforms: ${{ env.PLATFORMS }}
           build-args: |
             V_REV=master
-          # Only :static is published here; the version tag comes from the
-          # release job, which builds the same file with V_REV=<tag>.
+          # Only :static is published here. A version tag would come from the
+          # release job in vlang/v, which passes V_REV=<tag> - but that job does
+          # not build this file yet, and until vlang/v#29883 merges there is no
+          # :static-<version> anywhere.
           labels: |
             org.opencontainers.image.title=${{ env.DOCKER_REPOSITORY }}/vlang:static
             org.opencontainers.image.description="Scratch image with a static V compiler; a base for static V programs, not a build environment"

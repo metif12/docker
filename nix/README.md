@@ -8,8 +8,13 @@ nix develop          # gcc, make, git, openssl, sqlite, pkg-config
 make                 # builds ./v in this checkout
 ```
 
-`nixpkgs` is pinned in `flake.lock` to the same revision `NIXPKGS_REV` names in
-`Dockerfile.nix.build`, so bumping the pin changes both together.
+`nixpkgs` is pinned inline in the flake's `url`,
+`github:NixOS/nixpkgs/39ad350a0602fa0a58a544344e3e9187526ea45c`, to the same
+revision `NIXPKGS_REV` names in `Dockerfile.nix.build`, so bumping the pin changes
+both together. There is no committed `flake.lock`: the revision is in the input
+URL, which pins the source tree but not the dependency graph a lock file would
+freeze. Run `nix flake update` once and commit the result if you want that, or
+leave it as is for a source pin only.
 
 ## Why there is no `nix build .#image`
 

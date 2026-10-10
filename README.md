@@ -23,12 +23,15 @@ C compiler can only run things that were compiled elsewhere.
 | `:nix` | `nixos/nix` | glibc | gcc | a pinned nixpkgs toolchain; `nix-shell -p <pkg>` works inside |
 | `:static` | `scratch` | none | none | `v version`, and as a base for a static V program |
 | `:<dist>-dev` | the `-build` image | as above | as above | a working V checkout, for working on V itself |
-| `:<dist>-build` / `:<dist>-base` | the distro image | as above | `-build` has them, `-base` has none | the intermediate images the Dockerfiles stand on |
+| `:<dist>-build` | the `-base` image | as above | alpine and nix ship gcc; debian and ubuntu ship clang and no gcc | the intermediate images the Dockerfiles stand on |
+| `:<dist>-base` | the distro image | as above | none | the minimal dependencies layer, with no compiler of its own |
 
 `:debian`, `:alpine` and `:nix` are floating tags tracking V master, rebuilt
 nightly. Every variant is published for both `linux/amd64` and `linux/arm64`.
-`:static` is published as `:static` by the nightly workflow and additionally as
-`:static-<version>` by the release job.
+`:static` is published as `:static` by the nightly workflow. The `:<version>`
+tags do not exist yet — they come from a release job in `vlang/v` that is part of
+an open change there (see below), so until that lands the only tags are the
+floating ones.
 
 `:debian` and `:alpine` differ in more than the package manager: the `:debian`
 image is glibc, so a program you compile in it runs on Debian, Ubuntu, Fedora
@@ -271,7 +274,7 @@ podman manifest push vlang-nix:latest docker://myregistry/vlang:latest
 | `build.yml` | push to `master`, PR, manual | `:<dist>-build` |
 | `build_ubuntu.yml` | push to `master`, PR, manual | `:ubuntu-base`, `:ubuntu-build` |
 | `nightly_builds.yml` | daily 02:00 UTC, push, PR | `:latest`, `:debian`, `:alpine`, `:nix`, `:static`, and every `:<dist>-dev` |
-| [vlang/v `hub_docker_ci.yml`](https://github.com/vlang/v/blob/master/.github/workflows/hub_docker_ci.yml) | a V release tag | the same variants, built from that tag, tagged `:<dist>-<version>` and `:<version>` for debian. It also re-publishes the floating tags, so a release run moves `:latest`, `:debian`, `:alpine` and `:nix` too; `:static` only ever gets `:static-<version>` from it |
+| [vlang/v `hub_docker_ci.yml`](https://github.com/vlang/v/blob/master/.github/workflows/hub_docker_ci.yml) (changed by [vlang/v#29883](https://github.com/vlang/v/pull/29883), still open) | a V release tag, or `workflow_dispatch` | **not yet live.** As of today that workflow builds only `debian` and `alpine`, from V master, and pushes only `:latest`, `:debian`, `:alpine`, `:debian-dev` and `:alpine-dev` — no `nix`, no `static`, no version tag. #29883 is what makes it pass `V_REV` and add the other two, so everything in the version-tag column above describes the state *after* it merges |
 
 Pushes require `DOCKER_USERNAME` and `DOCKER_TOKEN` secrets. `vars.PLATFORMS`
 and `vars.DOCKER_REPOSITORY` override the default platforms and namespace; the
