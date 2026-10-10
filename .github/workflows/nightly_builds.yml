@@ -15,9 +15,14 @@ on:
       - master
   pull_request:
     branches: [master]
+    # `docker/**` and the workflow itself cover what this builds, but the nix
+    # pin also lives in nix/ - without it, a PR that changes only the pin
+    # triggers nothing here, while the same change on master does. The
+    # asymmetry is invisible until a broken pin is pushed straight to master.
     paths:
       - '.github/workflows/nightly_builds.yml'
       - 'docker/**'
+      - 'nix/**'
   schedule:
     - cron: "0 2 * * *"
   workflow_dispatch:
