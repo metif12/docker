@@ -1,4 +1,4 @@
-![GitHub Workflow Status](https://img.shields.io/github/workflow/status/vlang/docker/Deploy%20nightly%20build%20to%20Dockerhub)
+![Build and deploy the nightly images](https://github.com/vlang/docker/actions/workflows/nightly_builds.yml/badge.svg)
 [![Docker Pulls](https://img.shields.io/docker/pulls/thevlang/vlang)](https://hub.docker.com/r/thevlang/vlang)
 [![Docker Image Size (latest by date)](https://img.shields.io/docker/image-size/thevlang/vlang)](https://hub.docker.com/r/thevlang/vlang/tags?page=1&ordering=last_updated)
 
@@ -20,10 +20,10 @@ C compiler can only run things that were compiled elsewhere.
 | --- | --- | --- | --- | --- |
 | `:latest` / `:debian` | `debian-base` | glibc | gcc | the default: a glibc binary built here runs on Debian, Ubuntu, Fedora and derivatives |
 | `:alpine` | `alpine-base` | musl | gcc | small images, and static executables (`-cflags -static`) |
-| `:nix` | `nixos/nix` | glibc | gcc | reproducible builds; pulling in any nixpkgs library |
+| `:nix` | `nixos/nix` | glibc | gcc | a pinned nixpkgs toolchain; `nix-shell -p <pkg>` works inside |
 | `:static` | `scratch` | none | none | `v version`, and as a base for a static V program |
 | `:<dist>-dev` | the `-build` image | as above | as above | a working V checkout, for working on V itself |
-| `:<dist>-build` / `:<dist>-base` | as above | as above | build deps only | the intermediate images the Dockerfiles stand on |
+| `:<dist>-build` / `:<dist>-base` | the distro image | as above | `-build` has them, `-base` has none | the intermediate images the Dockerfiles stand on |
 
 `:debian`, `:alpine` and `:nix` are floating tags tracking V master, rebuilt
 nightly. Every variant is published for both `linux/amd64` and `linux/arm64`.
@@ -44,8 +44,10 @@ familiar.
 docker run --rm -it -v "$PWD":/src -w /src thevlang/vlang:latest v run main.v
 ```
 
-`/src` is the working directory in every image, so mounting your project there
-is all the setup there is. On Windows, use `%CD%` instead of `"$PWD"`.
+`/src` is the working directory in every runtime image, so mounting your project
+there is all the setup there is. On Windows, use `%CD%` instead of `"$PWD"`. The
+`-base`, `-build` and `ubuntu-*` images use `/opt/vlang` instead, because they
+are build and CI images rather than anything you mount code into.
 
 ### An interactive shell
 
@@ -67,8 +69,8 @@ V creates a module cache and temporary files, so it needs a writable home:
 | Variable | Default in these images | Why it matters |
 | --- | --- | --- |
 | `HOME` | `/root`, except `:static` where it is `/tmp` | `~/.vmodules` and the tool cache live here |
-| `VTMP` | unset (V uses the system temp) | set it to a writable path in read-only containers |
-| `VMODULES` | unset | where `v install` puts modules |
+| `VTMP` | unset in every variant but `:static`, where it is `/tmp/v` | V's temp directory; set it to a writable path in read-only containers |
+| `VMODULES` | unset in every variant but `:static`, where it is `/tmp/vmodules` | where `v install` puts modules |
 
 In `:static` there is no writable `/root`, so `HOME` is set to `/tmp` — keep that
 in mind if you override the environment.
@@ -118,8 +120,9 @@ docker run --rm -v "$PWD":/src -w /src thevlang/vlang:alpine \
   v -prod -cc gcc -cflags -static -o program main.v
 ```
 
-`:static` also gives you the smallest possible V: ~19 MB for the compiler plus
-`vlib`. `v fmt`, `v doc` and the other subcommands are not included, because they
+`:static` also gives you the smallest possible V: about 66 MB for the compiler
+and `vlib` together, against roughly 100 MB for the debian and alpine runtime
+images. `v fmt`, `v doc` and the other subcommands are not included, because they
 are driven by building `cmd/tools/<tool>` from a source tree at run time (see
 `find_vroot` and `launch_external_tool` in `cmd/v/v.v`), which needs both a
 compiler and a checkout.
@@ -134,16 +137,19 @@ The toolchain comes from **one pinned nixpkgs revision**
 docker run --rm thevlang/vlang:nix v version
 ```
 
-The practical difference is what you can do *inside* the container. Any nixpkgs
-library can be made available without root, and the toolchain no longer drifts:
+The practical difference is what you can do *inside* the container: a nixpkgs
+library can be made available at build time, where on the other variants it
+would be a second base image:
 
 ```bash
 docker run --rm -v "$PWD":/src -w /src thevlang/vlang:nix \
   sh -c 'nix-shell -p openssl sqlite --run "v run main.v"'
 ```
 
-Bumping the pin is the only way the image contents change, which is what makes a
-`:nix` build reproducible. To build against a different pin:
+Bumping the pin is the only way the *toolchain* changes, so the compiler and
+libraries are the same from one build to the next. The base image is
+`nixos/nix:latest` and still floats, so "reproducible" here means the toolchain,
+not the whole rootfs. To build against a different pin:
 
 ```bash
 docker build -t vlang-nix-pinned \
@@ -158,7 +164,9 @@ or install Nix yourself and use the `devShell` in `nix/flake.nix`.
 ## Building the images yourself
 
 The build files are ordinary Dockerfiles, so Docker and Podman both read them.
-Every image that clones V takes the revision to build:
+Every V image this repository publishes takes the revision to build. The one
+exception is `Dockerfile.ubuntu`, which predates the `V_REV` argument and still
+clones whatever master is at build time:
 
 | Build arg | Default | Meaning |
 | --- | --- | --- |
@@ -177,13 +185,15 @@ docker build --build-arg V_REV=0.5.2 -t vlang-0.5.2 -f docker/vlang/Dockerfile.a
 docker build -t vlang-static -f docker/vlang/Dockerfile.static .
 ```
 
-Building `Dockerfile.alpine` / `Dockerfile.debian` / `Dockerfile.nix` needs the
-matching `-base` and `-build` images to exist locally under the namespace
-`USER` names. Either pull them, or build them first:
+Building `Dockerfile.alpine` and `Dockerfile.debian` needs the matching `-base`
+and `-build` images, and `Dockerfile.nix` needs `nix-build` — both of its stages
+stand on that one image, so it has no `-base`. Either pull them, or build them
+first. The namespace has to match on every step, which is what `--build-arg
+USER=` is for:
 
 ```bash
 docker build -t myuser/vlang:alpine-base -f docker/base/Dockerfile.alpine .
-docker build -t myuser/vlang:alpine-build -f docker/vlang/Dockerfile.alpine.build .
+docker build --build-arg USER=myuser -t myuser/vlang:alpine-build -f docker/vlang/Dockerfile.alpine.build .
 docker build --build-arg USER=myuser -t vlang-alpine -f docker/vlang/Dockerfile.alpine .
 ```
 
@@ -259,7 +269,7 @@ podman manifest push vlang-nix:latest docker://myregistry/vlang:latest
 | `build.yml` | push to `master`, PR, manual | `:<dist>-build` |
 | `build_ubuntu.yml` | push to `master`, PR, manual | `:ubuntu-base`, `:ubuntu-build` |
 | `nightly_builds.yml` | daily 02:00 UTC, push, PR | `:latest`, `:debian`, `:alpine`, `:nix`, `:static`, and every `:<dist>-dev` |
-| [vlang/v `hub_docker_ci.yml`](https://github.com/vlang/v/blob/master/.github/workflows/hub_docker_ci.yml) | a V release tag | the same variants, tagged `:<dist>-<version>` and `:<version>` built from that tag |
+| [vlang/v `hub_docker_ci.yml`](https://github.com/vlang/v/blob/master/.github/workflows/hub_docker_ci.yml) | a V release tag | the same variants, built from that tag, tagged `:<dist>-<version>` and `:<version>` for debian. It also re-publishes the floating tags, so a release run moves `:latest`, `:debian`, `:alpine` and `:nix` too; `:static` only ever gets `:static-<version>` from it |
 
 Pushes require `DOCKER_USERNAME` and `DOCKER_TOKEN` secrets. `vars.PLATFORMS`
 and `vars.DOCKER_REPOSITORY` override the default platforms and namespace; the

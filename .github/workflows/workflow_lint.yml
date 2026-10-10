@@ -1,0 +1,50 @@
+#### Lint the workflows
+name: Lint the GitHub Actions workflows
+
+# A workflow with a structural mistake is not a failing check - GitHub refuses to
+# register it, so it produces a run with zero jobs named after the file path, and
+# nothing looks wrong. That happened here: `strategy:` had `os:` directly under it
+# instead of under `matrix:`, which two of these files had, and they silently
+# published nothing.
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - '.github/workflows/*.yml'
+  pull_request:
+    branches: [master]
+    paths:
+      - '.github/workflows/*.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: workflow-lint-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  actionlint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run actionlint
+        uses: docker://rhysd/actionlint:1.7.7
+        with:
+          args: -shellcheck=
+        # Check the exit code, because the Docker action does not fail the step
+        # on a non-zero exit from the contained binary by itself.
+        continue-on-error: false
+
+      - name: Confirm actionlint actually saw the files
+        run: |
+          set -euo pipefail
+          count=$(ls .github/workflows/*.yml | wc -l)
+          echo "workflows: $count"
+          if [ "$count" -eq 0 ]; then
+            echo "no workflow files found - is the checkout empty?" >&2
+            exit 1
+          fi
