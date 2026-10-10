@@ -41,13 +41,14 @@ jobs:
     name: Build ${{ matrix.os }}
     runs-on: ubuntu-latest
     strategy:
-      # `nix` needs thevlang/vlang:nix-build from build.yml to have shipped at
-      # least once, exactly as alpine and debian need their -build images.
-      os:
-        - alpine
-        - debian
-        - nix
-      # One broken variant must not stop the other two being published.
+      matrix:
+        # `nix` needs thevlang/vlang:nix-build from build.yml to have shipped at
+        # least once, exactly as alpine and debian need their -build images.
+        os:
+          - alpine
+          - debian
+          - nix
+        # One broken variant must not stop the other two being published.
       fail-fast: false
     steps:
       - uses: actions/checkout@v4

@@ -57,15 +57,16 @@ jobs:
     needs: resolve
     runs-on: ubuntu-latest
     strategy:
-      # `nix` needs no base image: /opt/vlang is a plain WORKDIR in the
-      # nixos/nix base image, so the toolchain image is its first stage.
-      # ubuntu-base is built by build_ubuntu.yml, which builds
-      # thevlang/vlang:ubuntu-build on top of it.
-      include:
-        - os: alpine
-          file: docker/base/Dockerfile.alpine
-        - os: debian
-          file: docker/base/Dockerfile.debian
+      matrix:
+        # `nix` needs no base image: /opt/vlang is a plain WORKDIR in the
+        # nixos/nix base image, so the toolchain image is its first stage.
+        # ubuntu-base is built by build_ubuntu.yml, which builds
+        # thevlang/vlang:ubuntu-build on top of it.
+        include:
+          - os: alpine
+            file: docker/base/Dockerfile.alpine
+          - os: debian
+            file: docker/base/Dockerfile.debian
       fail-fast: false
     steps:
       - uses: actions/checkout@v4
