@@ -101,7 +101,9 @@ statically linked V compiler and `vlib`.
 # Works, because it needs nothing but the binary itself:
 docker run --rm thevlang/vlang:static v version
 
-# Does not work - V shells out to a C compiler for every `v run`:
+# Does not work. The first error is not the missing compiler but the missing
+# Boehm GC library, which V's default GC mode wants before it reaches a C
+# compiler; `-gc none` gets past that and then stops on the compiler.
 docker run --rm thevlang/vlang:static v run main.v
 ```
 
@@ -120,12 +122,12 @@ docker run --rm -v "$PWD":/src -w /src thevlang/vlang:alpine \
   v -prod -cc gcc -cflags -static -o program main.v
 ```
 
-`:static` also gives you the smallest possible V: about 66 MB for the compiler
-and `vlib` together, against roughly 100 MB for the debian and alpine runtime
-images. `v fmt`, `v doc` and the other subcommands are not included, because they
-are driven by building `cmd/tools/<tool>` from a source tree at run time (see
-`find_vroot` and `launch_external_tool` in `cmd/v/v.v`), which needs both a
-compiler and a checkout.
+The image is 78.6 MB compressed, against roughly 100 MB for the debian and
+alpine runtime images, so it is the smallest published V. `v fmt`, `v doc` and
+the other subcommands are not included, because they are driven by building
+`cmd/tools/<tool>` from a source tree at run time (see `find_vroot` and
+`launch_external_tool` in `cmd/v/v.v`), which needs both a compiler and a
+checkout — verified: `v fmt` fails with `the V source tree could not be found`.
 
 ## The `:nix` image
 
