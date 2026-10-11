@@ -29,6 +29,7 @@ MANIFEST = HERE / "manifest.json"
 # Line width the generated comment blocks wrap to.
 WIDTH = 78
 
+BSL = "\\"
 
 def load() -> dict:
     with MANIFEST.open(encoding="utf-8") as f:
@@ -509,6 +510,67 @@ def render_runtime(m: dict, name: str, v: dict) -> str:
     return "\n".join(L) + "\n"
 
 
+def render_dev(m: dict, name: str, v: dict) -> str:
+    """docker/vlang/Dockerfile.<name>.dev-full.
+
+    The -build image with a V checkout built in place, so the container is a
+    working tree rather than just a compiler.
+
+    The three of these were near-identical and hand-maintained, which is the
+    drift risk the manifest exists to remove: debian's described a compiler it
+    did not install (clang, not gcc), and that fix landed in one file only.
+    """
+    o = m["organisation"]
+    rel = "Dockerfile.nix" if v["layout"] == "nix" else "Dockerfile.alpine"
+    L = []
+    L.append("ARG USER=" + o)
+    if v["layout"] == "nix":
+        L.append("# Everything the toolchain image has, plus the full V source")
+        L.append("# tree built in place, so the container is a working V checkout")
+        L.append("# rather than just a compiler. Use it to hack on V itself:")
+        L.append("#")
+        L.append(f'#   docker run --rm -it -v "$PWD":/src {o}/vlang:{name}-dev sh')
+        L.append("#")
+        L.append("# Generated from manifest.json by render.py. Do not edit by hand.")
+        L.append("FROM ${USER}/vlang:" + name + "-build")
+    else:
+        L.append(f"# Generates a development image based on {name.capitalize()}, with V")
+        L.append("# compiled in place so the container is a working checkout rather")
+        L.append("# than just a compiler.")
+        L.append("#")
+        L.append("# Generated from manifest.json by render.py. Do not edit by hand.")
+        L.append(f"FROM @@USERN@@/vlang:{name}-build")
+    L.append("")
+    L.append('LABEL org.opencontainers.image.title="' + o + '/vlang:' + name + '-dev"')
+    L.append(f'LABEL org.opencontainers.image.description="A working V checkout '
+             f'on {name}, for working on V itself"')
+    L.append('LABEL org.opencontainers.image.source=' + m["source"])
+    L.append('LABEL org.opencontainers.image.licenses=' + m["licenses"])
+    L.append('LABEL org.opencontainers.image.authors="helto4real '
+             '<helto4real@joysoftware.xyz>, Sandro Martini <sandro.martini@gmail.com>"')
+    L.append("")
+    L.append("# Which V revision is built; see " + rel + ".")
+    L.append("ARG V_REV=" + m["default_v_rev"])
+    L.append("ARG V_REV")
+    L.append("")
+    L.append("WORKDIR " + m["vroot"])
+    L.append("")
+    if v["layout"] == "nix":
+        L.append("RUN git clone --depth 1 https://github.com/vlang/v . && " + BSL)
+        L.append('    git fetch --quiet --depth 1 origin "${V_REV}" && ' + BSL)
+        L.append("    git checkout --quiet FETCH_HEAD && " + BSL)
+    else:
+        L.append("RUN git clone --depth 1 https://github.com/vlang/v /opt/vlang && " + BSL)
+        L.append('    git -C /opt/vlang fetch --quiet --depth 1 origin "${V_REV}" && ' + BSL)
+        L.append("    git -C /opt/vlang checkout --quiet FETCH_HEAD && " + BSL)
+    L.append("    make " + v["build_make"] + " && v -version && " + BSL)
+    L.append("    mkdir /src")
+    L.append("")
+    L.append("WORKDIR /src")
+    L.append("")
+    return "\n".join(L) + "\n"
+
+
 def render_all(m: dict) -> dict[str, str]:
     """Every file the manifest owns, as {relative path: content}."""
     out = {}
@@ -519,10 +581,12 @@ def render_all(m: dict) -> dict[str, str]:
         if v["layout"] == "nix":
             out[f"docker/vlang/Dockerfile.{name}.build"] = render_build(m, name, v)
             out[f"docker/vlang/Dockerfile.{name}"] = render_runtime(m, name, v)
+            out[f"docker/vlang/Dockerfile.{name}.dev-full"] = render_dev(m, name, v)
             continue
         out[f"docker/base/Dockerfile.{name}"] = render_base(m, name, v)
         out[f"docker/vlang/Dockerfile.{name}.build"] = render_build(m, name, v)
         out[f"docker/vlang/Dockerfile.{name}"] = render_runtime(m, name, v)
+        out[f"docker/vlang/Dockerfile.{name}.dev-full"] = render_dev(m, name, v)
     return out
 
 

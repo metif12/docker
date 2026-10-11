@@ -1,17 +1,19 @@
 ARG USER=thevlang
+# Generates a development image based on Debian, with V
+# compiled in place so the container is a working checkout rather
+# than just a compiler.
+#
+# Generated from manifest.json by render.py. Do not edit by hand.
+FROM @@USERN@@/vlang:debian-build
+
+LABEL org.opencontainers.image.title="thevlang/vlang:debian-dev"
+LABEL org.opencontainers.image.description="A working V checkout on debian, for working on V itself"
+LABEL org.opencontainers.image.source=https://github.com/vlang/docker
+LABEL org.opencontainers.image.licenses=MIT
+LABEL org.opencontainers.image.authors="helto4real <helto4real@joysoftware.xyz>, Sandro Martini <sandro.martini@gmail.com>"
 
 # Which V revision is built; see Dockerfile.alpine.
 ARG V_REV=master
-
-# Generates development image based on Debian, with V compiled using clang
-FROM ${USER}/vlang:debian-build
-
-LABEL org.opencontainers.image.title="thevlang/vlang:debian-dev"
-LABEL org.opencontainers.image.description="A working V checkout, for working on V itself"
-LABEL org.opencontainers.image.source="https://github.com/vlang/docker"
-LABEL org.opencontainers.image.licenses="MIT"
-LABEL org.opencontainers.image.authors="helto4real <helto4real@joysoftware.xyz>, Sandro Martini <sandro.martini@gmail.com>"
-
 ARG V_REV
 
 WORKDIR /opt/vlang
@@ -23,3 +25,4 @@ RUN git clone --depth 1 https://github.com/vlang/v /opt/vlang && \
     mkdir /src
 
 WORKDIR /src
+
