@@ -222,11 +222,109 @@ def render_build(m: dict, name: str, v: dict) -> str:
     return "\n".join(L) + "\n"
 
 
+def clamp_timestamps(m: dict, v: dict, paths: list[str]) -> list[str]:
+    """Clamp mtimes so two builds of one commit give the same image.
+
+    Go does this in Dockerfile-linux.template and then *asserts* it in the build.
+    Without the assertion a `touch` that silently failed would leave the image
+    non-reproducible while every check said it was fine, which is exactly the
+    shape of bug this whole manifest exists to remove.
+    """
+    epoch = m.get("source_date_epoch")
+    if not epoch:
+        return []
+    joined = " ".join(paths)
+    return [
+        "# Clamp every timestamp so two builds of the same commit produce the",
+        "# same image. `git clone` and `make` both stamp files with the wall",
+        "# clock, and COPY bakes that into the layers.",
+        f"ARG SOURCE_DATE_EPOCH={epoch}",
+        f"RUN find {joined} -exec touch -h -d @${{SOURCE_DATE_EPOCH}} {{}} + && \\",
+        f"    newer=$(find {joined} -newermt @${{SOURCE_DATE_EPOCH}} -print -quit) && \\",
+        '    if [ -n "$newer" ]; then \\',
+        '        echo >&2 "timestamps not clamped: $newer"; exit 1; \\',
+        '    fi && \\',
+        '    echo "clamped to $SOURCE_DATE_EPOCH"',
+    ]
+
+
+def arch_case(m: dict, v: dict, indent: str = "    ") -> list[str]:
+    """Runtime architecture detection, the way Go's and Rust's Dockerfiles do it.
+
+    One Dockerfile then serves every architecture instead of relying on
+    `buildx --platform`, which is a different and untested code path for a local
+    `docker build` on arm64. The mapping is per package manager, because Alpine
+    and Debian do not spell the same architecture the same way.
+    """
+    arches = m["arches"]
+    family = {"apk": "apk", "apt": "dpkg"}[v["pkg_manager"]]
+    probe = "apk --print-arch" if family == "apk" else "dpkg --print-architecture"
+    out = ["# Detect the build architecture at build time, so one Dockerfile serves",
+           "# every variant instead of relying on buildx --platform. Alpine and",
+           "# Debian do not spell the same architecture the same way."]
+    out.append("RUN set -eu; \\")
+    out.append(f"{indent}arch=\"$({probe})\"; \\")
+    out.append(f"{indent}case \"$arch\" in \\")
+    for a in v["arches"]:
+        out.append(f"{indent}    {arches[a][family]}) echo \"building for {a}\" ;; \\")
+    out.append(f"{indent}    *) echo >&2 \"unsupported architecture: $arch\"; exit 1 ;; \\")
+    out.append(f"{indent}esac")
+    return out
+
+
 def render_runtime(m: dict, name: str, v: dict) -> str:
     """docker/vlang/Dockerfile.<name> - the published runtime image."""
     o = m["organisation"]
     arches = m["arches"]
     L = []
+
+    if name == "slim":
+        # Same builder as `static`, but only the compiler is carried across: no
+        # vlib, no C compiler, no package manager. The smallest V runtime.
+        L.append("# The smallest V runtime: a scratch image that runs one")
+        L.append("# already-compiled static V program.")
+        L.append("#")
+        L.append("# There is deliberately nothing else in here. No vlib, no C")
+        L.append("# compiler, no package manager, no shell. Compile your program in")
+        L.append("# `alpine` or `debian` first, with `-cflags -static` so it links")
+        L.append("# statically - otherwise there is no loader for it to start.")
+        L.append("#")
+        L.append("#   docker build -t myapp - <<'EOF'")
+        L.append("#   FROM thevlang/vlang:slim")
+        L.append("#   COPY --from=build /app/program /app/program")
+        L.append("#   CMD [\"/app/program\"]")
+        L.append("#   EOF")
+        L.append("#")
+        L.append("# Generated from manifest.json by render.py. Do not edit by hand.")
+        L.append(f"ARG V_REV={m['default_v_rev']}")
+        L.append("")
+        L.append(f"FROM {v['builder_base']} AS builder")
+        L.append("")
+        L.append("RUN apk --no-cache add " + " ".join(v["builder_packages"]))
+        L.append("")
+        L.append("WORKDIR " + m["vroot"])
+        L.append("ARG V_REV")
+        L.append("")
+        L.append("RUN git clone --depth 1 https://github.com/vlang/v . && \\")
+        L.append("    git fetch --quiet --depth 1 origin \"${V_REV}\" && \\")
+        L.append("    git checkout --quiet FETCH_HEAD && \\")
+        L.append(f"    make {v['build_make']} && \\")
+        L.append("    ./v -version")
+        L.append("")
+        L.extend(clamp_timestamps(m, v, ["/opt/vlang"]))
+        L.append("")
+        L.append("FROM scratch")
+        L.append("")
+        L.append('LABEL org.opencontainers.image.title="' + o + '/vlang:' + name + '"')
+        L.append(f'LABEL org.opencontainers.image.description="{v["description"]}"')
+        L.append(f'LABEL org.opencontainers.image.source={m["source"]}')
+        L.append(f'LABEL org.opencontainers.image.licenses={m["licenses"]}')
+        L.append("")
+        L.append("COPY --from=builder /opt/vlang/v /usr/local/bin/v")
+        L.append("")
+        L.append("ENTRYPOINT [\"/usr/local/bin/v\"]")
+        L.append("")
+        return "\n".join(L) + "\n"
 
     if name == "static":
         L.append("# Minimal `scratch`-based image holding a fully static V compiler.")
@@ -315,6 +413,8 @@ def render_runtime(m: dict, name: str, v: dict) -> str:
         L.append("    git checkout --quiet FETCH_HEAD && \\")
         L.append(f"    make {v['build_make']} && v -version")
         L.append("")
+        L.extend(clamp_timestamps(m, v, ["/opt/vlang"]))
+        L.append("")
         L.append(f"FROM ${{USER}}/vlang:{name}-build AS runtime")
         L.append("")
         L.append("COPY --from=builder /opt/vlang /opt/vlang")
@@ -365,6 +465,8 @@ def render_runtime(m: dict, name: str, v: dict) -> str:
     L.append("    git -C /opt/vlang checkout --quiet FETCH_HEAD && \\")
     L.append(f"    make {v['build_make']} && v -version")
     L.append("")
+    L.extend(clamp_timestamps(m, v, ["/opt/vlang"]))
+    L.append("")
     L.append("# Stage 2 - the runtime.")
     L.append(f"FROM ${{USER}}/vlang:{name}-base AS runtime")
     L.append("")
@@ -375,6 +477,9 @@ def render_runtime(m: dict, name: str, v: dict) -> str:
     L.append("")
     L.append(f'ENV VFLAGS="{v["runtime_vflags"]}"')
     L.append("")
+    if v.get("arch_check"):
+        L.extend(arch_case(m, v))
+        L.append("")
     if v["pkg_manager"] == "apk":
         L.extend(apk_line(v["runtime_packages"],
                           v.get("package_comments", {}).get("runtime")))

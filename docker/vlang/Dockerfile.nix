@@ -19,6 +19,17 @@ RUN git clone --depth 1 https://github.com/vlang/v . && \
     git checkout --quiet FETCH_HEAD && \
     make VFLAGS='-cc gcc' && v -version
 
+# Clamp every timestamp so two builds of the same commit produce the
+# same image. `git clone` and `make` both stamp files with the wall
+# clock, and COPY bakes that into the layers.
+ARG SOURCE_DATE_EPOCH=1735689600
+RUN find /opt/vlang -exec touch -h -d @${SOURCE_DATE_EPOCH} {} + && \
+    newer=$(find /opt/vlang -newermt @${SOURCE_DATE_EPOCH} -print -quit) && \
+    if [ -n "$newer" ]; then \
+        echo >&2 "timestamps not clamped: $newer"; exit 1; \
+    fi && \
+    echo "clamped to $SOURCE_DATE_EPOCH"
+
 FROM ${USER}/vlang:nix-build AS runtime
 
 COPY --from=builder /opt/vlang /opt/vlang

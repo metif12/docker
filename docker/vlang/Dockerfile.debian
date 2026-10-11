@@ -28,6 +28,17 @@ RUN git clone --depth 1 https://github.com/vlang/v /opt/vlang && \
     git -C /opt/vlang checkout --quiet FETCH_HEAD && \
     make CC=clang && v -version
 
+# Clamp every timestamp so two builds of the same commit produce the
+# same image. `git clone` and `make` both stamp files with the wall
+# clock, and COPY bakes that into the layers.
+ARG SOURCE_DATE_EPOCH=1735689600
+RUN find /opt/vlang -exec touch -h -d @${SOURCE_DATE_EPOCH} {} + && \
+    newer=$(find /opt/vlang -newermt @${SOURCE_DATE_EPOCH} -print -quit) && \
+    if [ -n "$newer" ]; then \
+        echo >&2 "timestamps not clamped: $newer"; exit 1; \
+    fi && \
+    echo "clamped to $SOURCE_DATE_EPOCH"
+
 # Stage 2 - the runtime.
 FROM ${USER}/vlang:debian-base AS runtime
 
@@ -37,6 +48,19 @@ LABEL org.opencontainers.image.source=https://github.com/vlang/docker
 LABEL org.opencontainers.image.licenses=MIT
 
 ENV VFLAGS="-cc gcc"
+
+# Detect the build architecture at build time, so one Dockerfile serves
+# every variant instead of relying on buildx --platform. Alpine and
+# Debian do not spell the same architecture the same way.
+RUN set -eu; \
+    arch="$(dpkg --print-architecture)"; \
+    case "$arch" in \
+        amd64) echo "building for amd64" ;; \
+        arm64) echo "building for arm64" ;; \
+        riscv64) echo "building for riscv64" ;; \
+        ppc64el) echo "building for ppc64le" ;; \
+        *) echo >&2 "unsupported architecture: $arch"; exit 1 ;; \
+    esac
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
