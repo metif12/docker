@@ -35,6 +35,7 @@ COPY --from=builder /opt/vlang/v /opt/vlang/v
 COPY --from=builder /opt/vlang/vlib /opt/vlang/vlib
 COPY --from=builder /opt/vlang/v.mod /opt/vlang/v.mod
 
+
 LABEL org.opencontainers.image.title="thevlang/vlang:static"
 LABEL org.opencontainers.image.description="A static V compiler in a scratch image, for v version and for running pre-compiled programs"
 LABEL org.opencontainers.image.source=https://github.com/vlang/docker

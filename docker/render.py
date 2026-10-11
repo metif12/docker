@@ -233,6 +233,12 @@ def clamp_timestamps(m: dict, v: dict, paths: list[str]) -> list[str]:
     epoch = m.get("source_date_epoch")
     if not epoch:
         return []
+    if v.get("layout") == "static":
+        # A `FROM scratch` stage has no shell, so there is nothing to run the
+        # clamp: COPY stamps its files with the build time and the final stage
+        # cannot correct it. debian, alpine and nix are reproducible; this one
+        # is not, and the reason is structural rather than an omission.
+        return []
     joined = " ".join(paths)
     return [
         "# Clamp every timestamp so two builds of the same commit produce the",
@@ -311,7 +317,6 @@ def render_runtime(m: dict, name: str, v: dict) -> str:
         L.append(f"    make {v['build_make']} && \\")
         L.append("    ./v -version")
         L.append("")
-        L.extend(clamp_timestamps(m, v, ["/opt/vlang"]))
         L.append("")
         L.append("FROM scratch")
         L.append("")
@@ -364,6 +369,9 @@ def render_runtime(m: dict, name: str, v: dict) -> str:
         L.append("COPY --from=builder /opt/vlang/vlib /opt/vlang/vlib")
         L.append("COPY --from=builder /opt/vlang/v.mod /opt/vlang/v.mod")
         L.append("")
+        # After the copy, not before it: COPY does not preserve mtimes.
+        L.extend(clamp_timestamps(m, v, ["/opt/vlang"]))
+        L.append("")
         L.append(f'LABEL org.opencontainers.image.title="{o}/vlang:static"')
         L.append(f'LABEL org.opencontainers.image.description="{v["description"]}"')
         L.append(f'LABEL org.opencontainers.image.source={m["source"]}')
@@ -413,11 +421,13 @@ def render_runtime(m: dict, name: str, v: dict) -> str:
         L.append("    git checkout --quiet FETCH_HEAD && \\")
         L.append(f"    make {v['build_make']} && v -version")
         L.append("")
-        L.extend(clamp_timestamps(m, v, ["/opt/vlang"]))
         L.append("")
         L.append(f"FROM ${{USER}}/vlang:{name}-build AS runtime")
         L.append("")
         L.append("COPY --from=builder /opt/vlang /opt/vlang")
+        L.append("")
+        # After the copy, not before it: COPY does not preserve mtimes.
+        L.extend(clamp_timestamps(m, v, ["/opt/vlang"]))
         L.append("")
         L.append('LABEL org.opencontainers.image.title="' + o + '/vlang:' + name + '"')
         L.append(f'LABEL org.opencontainers.image.description="{v["description"]}"')
@@ -465,8 +475,6 @@ def render_runtime(m: dict, name: str, v: dict) -> str:
     L.append("    git -C /opt/vlang checkout --quiet FETCH_HEAD && \\")
     L.append(f"    make {v['build_make']} && v -version")
     L.append("")
-    L.extend(clamp_timestamps(m, v, ["/opt/vlang"]))
-    L.append("")
     L.append("# Stage 2 - the runtime.")
     L.append(f"FROM ${{USER}}/vlang:{name}-base AS runtime")
     L.append("")
@@ -490,6 +498,11 @@ def render_runtime(m: dict, name: str, v: dict) -> str:
     L.append("")
     L.append("# Copy the prebuilt V compiler")
     L.append("COPY --from=builder /opt/vlang /opt/vlang")
+    L.append("")
+    # After the copy, not before it: COPY does not preserve mtimes. A clamp
+    # in the builder stage is invisible in the shipped image - measured: the
+    # builder was at the epoch while the image still showed the wall clock.
+    L.extend(clamp_timestamps(m, v, ["/opt/vlang"]))
     L.append("")
     L.append("WORKDIR /src")
     L.append("")

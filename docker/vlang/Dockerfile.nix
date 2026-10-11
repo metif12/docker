@@ -19,6 +19,11 @@ RUN git clone --depth 1 https://github.com/vlang/v . && \
     git checkout --quiet FETCH_HEAD && \
     make VFLAGS='-cc gcc' && v -version
 
+
+FROM ${USER}/vlang:nix-build AS runtime
+
+COPY --from=builder /opt/vlang /opt/vlang
+
 # Clamp every timestamp so two builds of the same commit produce the
 # same image. `git clone` and `make` both stamp files with the wall
 # clock, and COPY bakes that into the layers.
@@ -29,10 +34,6 @@ RUN find /opt/vlang -exec touch -h -d @${SOURCE_DATE_EPOCH} {} + && \
         echo >&2 "timestamps not clamped: $newer"; exit 1; \
     fi && \
     echo "clamped to $SOURCE_DATE_EPOCH"
-
-FROM ${USER}/vlang:nix-build AS runtime
-
-COPY --from=builder /opt/vlang /opt/vlang
 
 LABEL org.opencontainers.image.title="thevlang/vlang:nix"
 LABEL org.opencontainers.image.description="The V language on a pinned nixpkgs toolchain, with a C compiler so V can still build programs"
