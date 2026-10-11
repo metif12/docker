@@ -1,44 +1,52 @@
 # The V language on Debian, with a C compiler so V can still build programs.
 #
-# This image is glibc-based, which is what makes it worth having next to
-# Dockerfile.alpine: a glibc program linked here runs on Debian, Ubuntu, Fedora
-# and their derivatives, where a musl binary from the Alpine image does not.
+# This image is glibc-based, which is what makes it worth having next
+# to Dockerfile.alpine: a glibc program linked here runs on Debian,
+# Ubuntu, Fedora and their derivatives, where a musl binary from the
+# Alpine image does not.
+#
+# Generated from manifest.json by render.py. Do not edit by hand;
+# edit the manifest and re-render.
 ARG USER=thevlang
-# Which V revision is built; see the note in Dockerfile.alpine.
 ARG V_REV=master
+
 # Stage 1 - Build the V-compiler
 FROM ${USER}/vlang:debian-build AS builder
 
+# Redeclared here: an ARG declared before the first FROM is out of a
+# build stage's scope, so it has to be repeated to be readable by RUN.
 ARG V_REV
 
 WORKDIR /opt/vlang
 
 # CC=clang, not -cc gcc: debian-build installs clang and no gcc, and V's
-# Makefile passes CC to the bootstrap. Setting VFLAGS='-cc gcc' here fails with
-# "os: failed to find executable `gcc`" before the bootstrap even reaches cc.
+# Makefile passes CC to the bootstrap. Setting VFLAGS='-cc gcc' here fails
+# with "os: failed to find executable `gcc`" before the bootstrap even reaches
+# cc.
 RUN git clone --depth 1 https://github.com/vlang/v /opt/vlang && \
     git -C /opt/vlang fetch --quiet --depth 1 origin "${V_REV}" && \
     git -C /opt/vlang checkout --quiet FETCH_HEAD && \
     make CC=clang && v -version
 
-# Stage 2 - the runtime. gcc and libc6-dev are what V shells out to when it
-#           compiles a program; git is what `v install` uses. The runtime
-#           compiler is chosen independently of the one V was built with.
+# Stage 2 - the runtime.
 FROM ${USER}/vlang:debian-base AS runtime
+
+LABEL org.opencontainers.image.title="thevlang/vlang:debian"
+LABEL org.opencontainers.image.description="The V language on Debian/glibc, with a C compiler so V can still build programs"
+LABEL org.opencontainers.image.source=https://github.com/vlang/docker
+LABEL org.opencontainers.image.licenses=MIT
 
 ENV VFLAGS="-cc gcc"
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-    gcc libc6-dev git && \
+        gcc \
+        libc6-dev \
+        git && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Copy the prebuilt V compiler
 COPY --from=builder /opt/vlang /opt/vlang
 
-LABEL org.opencontainers.image.title="thevlang/vlang:debian"
-LABEL org.opencontainers.image.description="The V language on Debian/glibc, with a C compiler so V can still build programs"
-LABEL org.opencontainers.image.source="https://github.com/vlang/docker"
-LABEL org.opencontainers.image.licenses="MIT"
-
 WORKDIR /src
+

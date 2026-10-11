@@ -49,6 +49,21 @@ jobs:
             exit 1
           fi
 
+      # The Dockerfiles are generated from docker/manifest.json. A hand-edited
+      # Dockerfile silently diverges, and the two bugs that came from exactly
+      # that are why this exists: `debian` built FROM alpine-build (so `:debian`
+      # and `:alpine` were the same image), and the missing Boehm GC on Alpine.
+      # Both files looked individually plausible.
+      - name: Dockerfiles match the manifest
+        run: |
+          set -euo pipefail
+          # Installed explicitly: `python3` is not in the ubuntu:24.04 base image,
+          # and the runner having it is not something to rely on for a check that
+          # is supposed to fail loudly.
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends python3
+          python3 docker/render.py --check
+
       # A file with no trailing newline is a POSIX text-file convention that
       # matters here: POSIX defines a text file as ending in a newline, and a
       # change to the last line of one that does not shows

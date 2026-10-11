@@ -7,94 +7,52 @@
 #       CMD ["program"]
 #   * `v version`.
 #
-# What it is deliberately not: a compiler. There is no C compiler in this image
-# and V shells out to one for every `v run` / `v build`, so those do not work
-# here. Measured, the first failure is not the compiler: `v run` on a program that
-# does exist stops on the bundled Boehm GC library, which this image does not
-# carry and which V's default GC mode needs before it reaches a C compiler;
-# `v -gc none run` gets past that and then stops on the compiler.
+# What it is deliberately not: a compiler. There is no C compiler in
+# this image and V shells out to one for every `v run` / `v build`, so
+# those do not work here.
 #
-# `v fmt`, `v doc` and the other subcommands are also unavailable: they are driven
-# by building `cmd/tools/<tool>` from the V source tree (see cmd/v/v.v:find_vroot,
-# which looks for a GNUmakefile next to vlib/v, and launch_external_tool, which
-# compiles the tool and caches it), so they need both a compiler and a source tree
-# that this image does not carry. Verified: `v fmt` fails with "the V source tree
-# could not be found".
-#
-# Verified on linux/amd64 by building and running this image:
-#   v version                      -> V 0.5.2 ef2ec06
-#   v run /src/probe.v             -> fails: Boehm GC libgc.a not found
-#   v fmt /src/x.v                 -> fails: the V source tree could not be found
-#   /bin/sh                        -> exec fails, no such file (it is FROM scratch)
-#   as a base for a static binary  -> works
-#
-# Measured on Linux x86_64 (gcc 13, V 0.5.2 5bd6709): `make VFLAGS='-prod'
-# CFLAGS='-static' LDFLAGS='-static'` exits 0 and produces a 19 MB binary that
-# `ldd` reports as "not a dynamic executable". The assembled image is 78.6 MB
-# compressed, against ~100 MB for the debian and alpine runtime images.
-#
-# `--build-arg V_REV=<tag|sha|branch>` selects what is built, so a release image
-# can be built from the tag it is named after. The default is V master.
+# Generated from manifest.json by render.py. Do not edit by hand;
+# edit the manifest and re-render.
 ARG V_REV=master
 
 # Stage 1 - build a static V on Alpine/musl.
-# musl is what makes a useful static link possible here: V ships no shared
-# libraries of its own (`make` builds with `-gc none` by default), so the only
-# dynamic dependency to remove is libc.
 FROM alpine:3.23 AS builder
 
 RUN apk --no-cache add build-base git
 
 WORKDIR /opt/vlang
-
-# CFLAGS and LDFLAGS are picked up by the V Makefile and forwarded to the C
-# compiler as -cflags / -ldflags (see the `v` target in the Makefile). The
-# build directory is also the install directory: V bakes the location of its
-# own stdlib into the binary at compile time (vlib/v/pref/pref.v:detect_vroot
-# and the @VMODROOT handling in vlib/v/parser/parser.v:12149), so building
-# anywhere other than the runtime path yields a compiler that cannot find vlib.
-#
-# The fetch-and-checkout is what makes `--build-arg V_REV=<tag>` build exactly
-# that revision. Without it the clone would silently build whatever master is
-# when the layer happens to be cached.
 ARG V_REV
+
 RUN git clone --depth 1 https://github.com/vlang/v . && \
     git fetch --quiet --depth 1 origin "${V_REV}" && \
     git checkout --quiet FETCH_HEAD && \
     make VFLAGS='-prod' CFLAGS='-static' LDFLAGS='-static' && \
     ./v -version
 
-# Stage 2 - the image. `FROM scratch` means no libc, no loader and no shell, so
-#           the binary really does have to be static.
 FROM scratch
 
 COPY --from=builder /opt/vlang/v /opt/vlang/v
 COPY --from=builder /opt/vlang/vlib /opt/vlang/vlib
 COPY --from=builder /opt/vlang/v.mod /opt/vlang/v.mod
 
-# V writes its module cache and temp files under the home directory, which has
-# to be writable - in this image that is /tmp. /opt/vlang goes on PATH so that
-# `v` and the image's CMD resolve: without it the binary is only reachable by its
-# absolute path, which makes `docker run thevlang/vlang:static v version` and the
-# default CMD both fail.
+LABEL org.opencontainers.image.title="thevlang/vlang:static"
+LABEL org.opencontainers.image.description="A static V compiler in a scratch image, for v version and for running pre-compiled programs"
+LABEL org.opencontainers.image.source=https://github.com/vlang/docker
+LABEL org.opencontainers.image.licenses=MIT
+
+# V writes its module cache and temp files under the home directory,
+# which has to be writable - in this image that is /tmp. /opt/vlang
+# goes on PATH so that `v` and the image's CMD resolve.
 ENV PATH=/opt/vlang:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
     VEXE=/opt/vlang/v \
     HOME=/tmp \
     VMODULES=/tmp/vmodules \
     VTMP=/tmp/v
 
-LABEL org.opencontainers.image.title="thevlang/vlang:static"
-LABEL org.opencontainers.image.description="A static V compiler in a scratch image, for v version and for running pre-compiled programs"
-LABEL org.opencontainers.image.source="https://github.com/vlang/docker"
-LABEL org.opencontainers.image.licenses="MIT"
-
-# A static binary still reads these for TLS and for user lookups.
 COPY --from=builder /etc/passwd /etc/passwd
 COPY --from=builder /etc/group /etc/group
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 
 WORKDIR /src
 
-# `v version` is the default: a bare `v` tries to start a REPL and fails with
-# "the V source tree could not be found", which is a confusing first experience.
 CMD ["v", "version"]

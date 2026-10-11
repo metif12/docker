@@ -1,20 +1,15 @@
-# Minimal image for compiling V programs
-# - No UI dependencies
-# - gcc compiler (only works on alpine)
-
+# The V language on Alpine.
+#
+# Generated from manifest.json by render.py. Do not edit by hand;
+# edit the manifest and re-render.
 ARG USER=thevlang
-
-# Which V revision is built: a branch, tag or commit. The default is V master,
-# which is what the nightly images are. The release images are built from the
-# tag itself, by the vlang/v `hub_docker_ci.yml` job that triggers on a V
-# release tag, so a `:<version>` image contains exactly that version.
 ARG V_REV=master
 
 # Stage 1 - Build the V-compiler
 FROM ${USER}/vlang:alpine-build AS builder
 
-# Redeclared here: an ARG declared before the first FROM is out of a build
-# stage's scope, so it has to be repeated to be readable by these RUN commands.
+# Redeclared here: an ARG declared before the first FROM is out of a
+# build stage's scope, so it has to be repeated to be readable by RUN.
 ARG V_REV
 
 WORKDIR /opt/vlang
@@ -24,30 +19,27 @@ RUN git clone --depth 1 https://github.com/vlang/v /opt/vlang && \
     git -C /opt/vlang checkout --quiet FETCH_HEAD && \
     make VFLAGS='-cc gcc' && v -version
 
-# Stage 2 - Make minimal runtime without git and make 
-#           we still nedd gcc and musl-dev for v to compile;
-#           libexecinfo is needed for the bundled tcc to work;
-#           libc-dev is needed for the various C headers like inttypes.h .
-
+# Stage 2 - the runtime.
 FROM ${USER}/vlang:alpine-base AS runtime
+
+LABEL org.opencontainers.image.title="thevlang/vlang:alpine"
+LABEL org.opencontainers.image.description="The V language on Alpine/musl, with a C compiler so V can still build programs"
+LABEL org.opencontainers.image.source=https://github.com/vlang/docker
+LABEL org.opencontainers.image.licenses=MIT
 
 ENV VFLAGS="-cc gcc"
 
 RUN apk --no-cache add \
-    # gcc and musl-dev are what V shells out to when it compiles a program;
-    # libc-dev is needed for the various C headers like inttypes.h
-    gcc musl-dev git libc-dev \
-    # Boehm GC, which V links against in its default GC mode, so without it
-    # every `v run` in this image fails the way the build does.
+    gcc \
+    musl-dev \
+    git \
+    # needed for the various C headers like inttypes.h
+    libc-dev \
+    # Boehm GC, which V links against in its default GC mode, so without it every `v run` in this image fails the way the build does
     gc
-# libexecinfo-static libexecinfo-dev : was removed since Alpine 3.17, check if still needed or remove this line
 
 # Copy the prebuilt V compiler
 COPY --from=builder /opt/vlang /opt/vlang
 
-LABEL org.opencontainers.image.title="thevlang/vlang:alpine"
-LABEL org.opencontainers.image.description="The V language on Alpine/musl, with a C compiler so V can still build programs"
-LABEL org.opencontainers.image.source="https://github.com/vlang/docker"
-LABEL org.opencontainers.image.licenses="MIT"
-
 WORKDIR /src
+
